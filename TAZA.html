@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tazas 3D — Pintura 3D independiente</title>
+<style>
+html,body{height:100%;margin:0;background:#000;overflow:hidden;font-family:Inter,Arial,Helvetica;}
+#canvas{width:100%;height:100%;display:block;cursor:default;}
+#menu{
+  position:absolute;
+  top:12px;
+  left:12px;
+  z-index:10;
+  background:rgba(0,0,0,0.6);
+  padding:10px 12px;
+  border-radius:8px;
+  color:#fff;
+}
+label{display:block;margin-bottom:6px;font-size:13}
+select{
+  background:#111;
+  color:white;
+  border:1px solid #444;
+  padding:6px 10px;
+  border-radius:6px;
+  font-size:14px;
+  outline:none;
+}
+.hint{position:absolute;top:12px;right:12px;color:#fff;background:rgba(0,0,0,0.35);padding:8px 10px;border-radius:8px;font-size:13}
+#tools{
+  position:absolute;
+  top:12px;
+  right:12px;
+  z-index:11;
+  background:rgba(0,0,0,0.6);
+  padding:10px 12px;
+  border-radius:8px;
+  color:#fff;
+  display:flex;
+  gap:8px;
+  align-items:center;
+  flex-direction: column;
+}
+#tools button{
+  background:#111;
+  color:white;
+  border:1px solid #444;
+  padding:6px 10px;
+  border-radius:6px;
+  cursor:pointer;
+  font-size:14px;
+}
+#tools input[type=color]{ width:32px; height:32px; padding:0; border:none; border-radius:4px; cursor:pointer;}
+#tools input[type=range]{width:100%;}
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+
+<div id="menu">
+<label for="modelSelect">Tazas</label>
+<select id="modelSelect">
+  <option value="clasica">Clásica</option>
+  <option value="moderna">Moderna</option>
+  <option value="ancha">Ancha</option>
+  <option value="cuadrada">Cuadrada</option>
+  <option value="corazon">Corazón</option>
+  <option value="ondulada">Ondulada</option>
+</select>
+</div>
+
+<div id="tools">
+<input type="color" id="colorPicker" value="#ff0000" title="Selecciona color"/>
+<button id="eraser">Borrador</button>
+<label for="brushSize">Tamaño</label>
+<input type="range" id="brushSize" min="2" max="50" value="8" />
+<label for="imgUpload">Imagen</label>
+<input type="file" id="imgUpload" accept="image/*"/>
+</div>
+
+<div class="hint">Clic derecho + arrastrar = rotar · Rueda = zoom · Clic izquierdo + arrastrar = pintar/insertar imagen · Teclas + / - = escalar imagen</div>
+
+<script src="https://unpkg.com/three@0.152.2/build/three.min.js"></script>
+<script>
+const canvas = document.getElementById('canvas');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputEncoding = THREE.sRGBEncoding;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000000);
+
+const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 100);
+camera.position.set(0, 0.8, 3);
+
+const ambient = new THREE.AmbientLight(0xffffff,0.45);
+const key = new THREE.DirectionalLight(0xffffff,0.9);
+key.position.set(3,5,4);
+const fill = new THREE.DirectionalLight(0xffffff,0.35);
+fill.position.set(-3,2,-3);
+scene.add(ambient,key,fill);
+
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+let painting=false, currentColor='#ff0000', isEraser=false, brushSize=8;
+let mugGroup=null, imgTexture=null, imgScale=0.3;
+
+const textureSize=1024;
+
+function createPaintMaterial(){
+  const c=document.createElement('canvas');
+  c.width=textureSize; c.height=textureSize;
+  const ctx=c.getContext('2d');
+  ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,textureSize,textureSize);
+  const tex=new THREE.CanvasTexture(c);
+  const mat=new THREE.MeshPhysicalMaterial({map:tex,roughness:0.18,metalness:0,clearcoat:1,clearcoatRoughness:0.06,side:THREE.FrontSide});
+  return {mat,tex,ctx};
+}
+
+let bodyPaint=createPaintMaterial();
+let handlePaint=createPaintMaterial();
+let innerMat=new THREE.MeshPhysicalMaterial({color:0xffffff,roughness:0.18,metalness:0,clearcoat:1,clearcoatRoughness:0.06,side:THREE.BackSide});
+
+// --- Funciones originales de tazas (mantengo todo) ---
+function makeHollowLathe(profilePoints, segments=96, thickness=0.06){
+  const outerGeo=new THREE.LatheGeometry(profilePoints,segments);
+  const innerProfile=profilePoints.map(p=>new THREE.Vector2(Math.max(0.001,p.x-thickness),p.y));
+  const innerGeo=new THREE.LatheGeometry(innerProfile,segments);
+  const outerMesh=new THREE.Mesh(outerGeo,bodyPaint.mat);
+  const innerMesh=new THREE.Mesh(innerGeo,innerMat);
+  const topY=profilePoints[profilePoints.length-1].y;
+  const topInnerR=Math.max(0.001,profilePoints[profilePoints.length-1].x-thickness);
+  const rimGeo=new THREE.RingGeometry(topInnerR,profilePoints[profilePoints.length-1].x,64);
+  const rim=new THREE.Mesh(rimGeo,bodyPaint.mat);
+  rim.rotation.x=-Math.PI/2; rim.position.y=topY;
+  const bottomY=profilePoints[0].y;
+  const bottomR=profilePoints[0].x;
+  const baseGeo=new THREE.CircleGeometry(bottomR-0.001,64);
+  const baseMat=bodyPaint.mat.clone(); baseMat.side=THREE.DoubleSide;
+  const base=new THREE.Mesh(baseGeo,baseMat);
+  base.rotation.x=-Math.PI/2; base.position.y=bottomY;
+  const g=new THREE.Group(); g.add(outerMesh,innerMesh,rim,base);
+  return {group:g,outerRadius:profilePoints.reduce((mx,p)=>Math.max(mx,p.x),0),topY,bottomY};
+}
+
+function makeHandle(attachedRadius, topY){
+  const offset=attachedRadius+0.02;
+  const span=attachedRadius*0.9;
+  const height=topY*0.7;
+  const tubeRadius=attachedRadius*0.065;
+  class HCurve extends THREE.Curve{constructor(o,s,h){super(); this.o=o; this.s=s; this.h=h;} getPoint(t){const a=(t-0.5)*Math.PI; const x=Math.cos(a)*this.s+this.o; const y=Math.sin(a)*this.h+this.h*0.05; const z=Math.sin(t*Math.PI*2)*(this.s*0.03); return new THREE.Vector3(x,y,z);}}
+  const path=new HCurve(offset,span,height);
+  const geo=new THREE.TubeGeometry(path,96,tubeRadius,16,false);
+  return new THREE.Mesh(geo,handlePaint.mat);
+}
+
+function buildModel(name){
+  const thickness=0.06;
+  if(name==='clasica'){const h=0.5;const pts=[new THREE.Vector2(0.75,-h),new THREE.Vector2(0.8,-h*0.3),new THREE.Vector2(0.86,0.05),new THREE.Vector2(0.82,h*0.6),new THREE.Vector2(0.78,h)];return { hollow: makeHollowLathe(pts,128,thickness), style:'clasica' };}
+  if(name==='moderna'){const h=0.95;const pts=[new THREE.Vector2(0.58,-h),new THREE.Vector2(0.6,-h*0.2),new THREE.Vector2(0.62,h*0.2),new THREE.Vector2(0.6,h)];return { hollow: makeHollowLathe(pts,128,thickness), style:'moderna' };}
+  if(name==='ancha'){const h=0.32;const pts=[new THREE.Vector2(1.02,-h),new THREE.Vector2(1.08,-h*0.1),new THREE.Vector2(1.12,0.05),new THREE.Vector2(1.05,h)];return { hollow: makeHollowLathe(pts,128,thickness), style:'ancha' };}
+  if(name==='cuadrada'){const h=0.55;const pts=[new THREE.Vector2(0.78,-h),new THREE.Vector2(0.78,-h*0.2),new THREE.Vector2(0.78,0.12),new THREE.Vector2(0.78,h)];const hollow=makeHollowLathe(pts,32,thickness);hollow.group.traverse(m=>{if(m.isMesh)m.geometry.computeVertexNormals();});return { hollow, style:'cuadrada' };}
+  if(name==='corazon'){const h=0.6;const pts=[];const steps=60;for(let i=0;i<=steps;i++){const t=i/steps;const y=-h+t*(2*h);const swell=0.25*Math.exp(-Math.pow((y-h*0.15)/(h*0.3),2));const base=0.6+swell;pts.push(new THREE.Vector2(base,y));}return { hollow: makeHollowLathe(pts,128,thickness), style:'corazon' };}
+  if(name==='ondulada'){const h=0.7;const pts=[];const steps=80;for(let i=0;i<=steps;i++){const t=i/steps;const y=-h+t*(2*h);const wave=0.12*Math.sin(t*Math.PI*6)*Math.exp(-Math.abs(t-0.5)*0.8);const base=0.75+wave+0.08*Math.cos(t*Math.PI*2);pts.push(new THREE.Vector2(Math.max(0.08,base),y));}return { hollow: makeHollowLathe(pts,180,thickness), style:'ondulada' };}
+  return buildModel('clasica');
+}
+
+function showModel(name){
+  if(mugGroup) scene.remove(mugGroup);
+  const built=buildModel(name);
+  mugGroup=new THREE.Group();
+  mugGroup.add(built.hollow.group);
+  const outerRadius=built.hollow.outerRadius||0.8;
+  const topY=built.hollow.topY||0.5;
+  const handleMesh=makeHandle(outerRadius,topY);
+  mugGroup.add(handleMesh);
+  const cupHeight=Math.abs(built.hollow.topY-built.hollow.bottomY)||1.0;
+  mugGroup.position.y=-(built.hollow.bottomY+cupHeight*0.06);
+  scene.add(mugGroup);
+}
+
+showModel('clasica');
+
+// --- Eventos ---
+let dragging=false, prev={x:0,y:0};
+canvas.addEventListener('contextmenu',e=>e.preventDefault());
+canvas.addEventListener('pointerdown',e=>{if(e.button===2) dragging=true; if(e.button===0) painting=true; prev.x=e.clientX; prev.y=e.clientY;});
+window.addEventListener('pointermove',e=>{
+  const dx=e.clientX-prev.x, dy=e.clientY-prev.y;
+  if(dragging && mugGroup){mugGroup.rotation.y+=dx*0.005;mugGroup.rotation.x+=dy*0.003;mugGroup.rotation.x=Math.max(-1.1,Math.min(1.1,mugGroup.rotation.x));}
+  prev.x=e.clientX; prev.y=e.clientY;
+  if(painting){
+    canvas.style.cursor=isEraser?"url('https://cdn-icons-png.flaticon.com/512/2780/2780479.png') 0 32, auto":"url('https://cdn-icons-png.flaticon.com/512/1177/1177568.png') 0 32, auto";
+    mouse.x=(e.clientX/window.innerWidth)*2-1;
+    mouse.y=-(e.clientY/window.innerHeight)*2+1;
+    raycaster.setFromCamera(mouse,camera);
+    const intersects=raycaster.intersectObjects(mugGroup.children,true);
+    if(intersects.length>0){
+      let hit=intersects.find(i=>{const mat=i.object.material; return Array.isArray(mat)? mat.some(m=>m.side===THREE.FrontSide) : mat.side===THREE.FrontSide;});
+      if(hit && hit.uv && hit.object.material.map){
+        const uv=hit.uv;
+        const x=uv.x*textureSize;
+        const y=(1-uv.y)*textureSize;
+        const ctx=hit.object.material.map.image.getContext('2d');
+        if(imgTexture){
+          const w=imgTexture.width*imgScale;
+          const h=imgTexture.height*imgScale;
+          ctx.drawImage(imgTexture, x-w/2, y-h/2, w, h);
+        } else {
+          ctx.fillStyle=currentColor;
+          ctx.beginPath(); ctx.arc(x,y,brushSize,0,Math.PI*2); ctx.fill();
+        }
+        hit.object.material.map.needsUpdate=true;
+      }
+    }
+  } else canvas.style.cursor="default";
+});
+window.addEventListener('pointerup',e=>{if(e.button===2) dragging=false; if(e.button===0) painting=false;});
+canvas.addEventListener('wheel',e=>{e.preventDefault();camera.position.z+=e.deltaY*0.0025;camera.position.z=Math.max(1.05,Math.min(8,camera.position.z));},{passive:false});
+
+document.getElementById('modelSelect').addEventListener('change',e=>showModel(e.target.value));
+document.getElementById('colorPicker').addEventListener('input',e=>{currentColor=e.target.value; isEraser=false;});
+document.getElementById('eraser').addEventListener('click',()=>{currentColor='#ffffff'; isEraser=true;});
+document.getElementById('brushSize').addEventListener('input',e=>{brushSize=e.target.value;});
+
+// --- Subir imagen ---
+document.getElementById('imgUpload').addEventListener('change',e=>{
+  const file=e.target.files[0];
+  if(file){
+    const img=new Image();
+    img.onload=()=>{imgTexture=img; imgScale=0.3;} // tamaño inicial
+    img.src=URL.createObjectURL(file);
+  }
+});
+
+// --- Escalar imagen con + y - ---
+window.addEventListener('keydown', e=>{
+  if(imgTexture){
+    if(e.key==='+' || e.key==='=') imgScale *= 1.1;
+    if(e.key==='-' || e.key==='_') imgScale = Math.max(0.05, imgScale / 1.1);
+  }
+});
+
+window.addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();});
+
+function animate(){requestAnimationFrame(animate);renderer.render(scene,camera);}
+animate();
+</script>
+</body>
+</html>
+
+
+
