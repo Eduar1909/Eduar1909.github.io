@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Tazas 3D — Pintura 3D independiente</title>
 <style>
-html,body{height:100%;margin:0;background:#000;overflow:hidden;font-family:Inter,Arial,Helvetica; touch-action: none; overscroll-behavior: none;}
+html, body{height:100%;margin:0;background:#000;overflow:hidden;font-family:Inter,Arial,Helvetica; touch-action: none; overscroll-behavior: none;}
 #canvas{width:100%;height:100%;display:block;cursor:default;}
 #menu{
   position:absolute;
@@ -77,6 +77,8 @@ select{
 <input type="range" id="brushSize" min="2" max="50" value="8" />
 <label for="imgUpload">Imagen</label>
 <input type="file" id="imgUpload" accept="image/*"/>
+<button id="clearAllBtn">Borrar todo</button>
+
 </div>
 
 
@@ -225,6 +227,26 @@ document.getElementById('colorPicker').addEventListener('input',e=>{currentColor
 document.getElementById('eraser').addEventListener('click',()=>{currentColor='#ffffff'; isEraser=true;});
 document.getElementById('brushSize').addEventListener('input',e=>{brushSize=e.target.value;});
 
+// BOTÓN: BORRAR TODA LA TEXTURA (funciona con bodyPaint y handlePaint)
+document.getElementById('clearAllBtn').addEventListener('click', () => {
+  // Si existen los objetos creados por createPaintMaterial, los limpiamos
+  [bodyPaint, handlePaint].forEach(p => {
+    if (p && p.ctx) {
+      // Rellenar con blanco (igual que el estado inicial)
+      p.ctx.fillStyle = '#ffffff';
+      p.ctx.fillRect(0, 0, textureSize, textureSize);
+      // Marcar la textura para que three.js la actualice
+      if (p.mat && p.mat.map) p.mat.map.needsUpdate = true;
+    }
+  });
+
+  // Si además quieres remover cualquier imagen cargada para pintar:
+  // imgTexture = null;
+
+  // Forzar re-render inmediato (opcional)
+  renderer.render(scene, camera);
+});
+
 // --- Subir imagen ---
 document.getElementById('imgUpload').addEventListener('change',e=>{
   const file=e.target.files[0];
@@ -368,7 +390,5 @@ animate();
 </script>
 </body>
 </html>
-
-
 
 
