@@ -58,6 +58,32 @@ select{
 <body>
 <canvas id="canvas"></canvas>
 
+<div id="confirmClear" style="
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(0,0,0,0.6);
+  display: none;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+">
+  <div style="
+    background: #fff;
+    padding: 20px;
+    border-radius: 10px;
+    text-align: center;
+    width: 280px;
+    font-family: Arial;
+  ">
+    <h3>¿Borrar todo?</h3>
+    <p>Esto eliminará toda la pintura.</p>
+    <button id="cancelClear">Cancelar</button>
+    <button id="confirmClearYes">Sí, borrar</button>
+  </div>
+</div>
+
+
 <div id="menu">
 <label for="modelSelect">Tazas</label>
 <select id="modelSelect">
@@ -229,23 +255,24 @@ document.getElementById('brushSize').addEventListener('input',e=>{brushSize=e.ta
 
 // BOTÓN: BORRAR TODA LA TEXTURA (funciona con bodyPaint y handlePaint)
 document.getElementById('clearAllBtn').addEventListener('click', () => {
-  // Si existen los objetos creados por createPaintMaterial, los limpiamos
+
+  if (!confirm("¿Estás seguro de borrar todo?")) {
+    return; // Si dice que NO, no borra nada
+  }
+
+  // Si dice SÍ → procede a borrar
   [bodyPaint, handlePaint].forEach(p => {
     if (p && p.ctx) {
-      // Rellenar con blanco (igual que el estado inicial)
       p.ctx.fillStyle = '#ffffff';
       p.ctx.fillRect(0, 0, textureSize, textureSize);
-      // Marcar la textura para que three.js la actualice
       if (p.mat && p.mat.map) p.mat.map.needsUpdate = true;
     }
   });
 
-  // Si además quieres remover cualquier imagen cargada para pintar:
-  // imgTexture = null;
-
-  // Forzar re-render inmediato (opcional)
   renderer.render(scene, camera);
 });
+
+
 
 // --- Subir imagen ---
 document.getElementById('imgUpload').addEventListener('change',e=>{
@@ -390,6 +417,7 @@ animate();
 </script>
 </body>
 </html>
+
 
 
 
